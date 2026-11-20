@@ -1,5 +1,7 @@
 node_modules
 dist
+/bundle.mjs
+/worker.js
 src/renderer/pages/.umi
 src/renderer/pages/.umi-production
 release
@@ -8,3 +10,11 @@ yarn.lock
 .history
 .umirc.local.js
 .now
+.vscode/
+.idea/
+.tools/
+.npm-cache/
+
+.wrangler/
+.dev.vars
+.env
