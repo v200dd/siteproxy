@@ -7,7 +7,7 @@ SiteProxy 是一个基于 [Hono](https://hono.dev/) 的在线网页代理。访�
 - 服务端按职责拆分到 `src/` 下的多个模块；
 - 原混淆包中的浏览器端脚本 `client.js`、`service-worker.js` 已还原为可读源码并纳入版本管理；
 - 使用 esbuild 生成 Node 与 Workers 产物；
-- 仅保留 Node 与 Workers 部署方式，不再包含 Cloudflare Pages、Docker、RSA/AES 登录加密逻辑和测试套件。
+- 仅保留 Node 与 Workers 部署方式，不再包含 Cloudflare Pages、Docker 和 RSA/AES 登录加密逻辑。
 
 > [!CAUTION]
 > 请勿将本项目用于任何违法用途。通过本项目访问第三方网站时，请遵守目标网站的服务条款和当地法律法规。
@@ -42,7 +42,7 @@ SiteProxy 是一个基于 [Hono](https://hono.dev/) 的在线网页代理。访�
    - 或者本地构建：
 
 ```bash
-npm install
+npm ci
 npm run build
 ```
 
@@ -100,7 +100,7 @@ node bundle.mjs
 3. 安装依赖并生成 Node 产物：
 
 ```bash
-npm install
+npm ci
 npm run build
 ```
 
@@ -189,6 +189,9 @@ Hono 应用（Node / Cloudflare Worker）
 
 ```text
 .
+├── .github/workflows/
+│   ├── ci.yml                 # 测试、构建和 Wrangler dry-run
+│   └── release.yml            # tag 驱动的自动 Release
 ├── src/
 │   ├── index.mjs              # Hono 应用装配、中间件顺序、Node 启动、Worker 导出
 │   ├── config.mjs             # 配置加载、兼容站点列表、运行环境判断
@@ -208,8 +211,10 @@ Hono 应用（Node / Cloudflare Worker）
 │       └── service-worker.js  # Service Worker 源码
 ├── scripts/
 │   └── build.mjs              # esbuild 打包脚本
+├── test/                      # 配置、路由、解析和改写测试
 ├── config.json                # Node 运行配置
 ├── wrangler.jsonc              # Cloudflare Workers 配置
+├── package-lock.json          # npm 依赖锁文件
 ├── bundle.mjs                 # 构建产物：Node 入口（已忽略）
 ├── worker.js                  # 构建产物：Workers 入口（已忽略）
 └── package.json
@@ -246,7 +251,6 @@ Hono 应用（Node / Cloudflare Worker）
 - **Cookie 有效期**：被改写的非删除类 Cookie 会统一追加 `Max-Age=1800`（约 30 分钟）。
 - **站点兼容性**：依赖严格 CSP、复杂登录流程或特殊协议的网站可能无法正常使用；YouTube 等站点可能受反爬策略影响。
 - **登录页风险**：代理页面可能被用于钓鱼，客户端会插入顶部警告条；请不要在通过代理打开的页面中输入敏感信息。
-- **没有自动化测试**：当前仓库未包含测试套件，修改后请自行做基本的手工验证。
 - **Service Worker 依赖 HTTPS**：非 localhost 的纯 HTTP 部署无法注册 Service Worker，动态 URL 处理和大响应头还原会失效。
 
 ## 上游与许可

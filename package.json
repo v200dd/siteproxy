@@ -1,15 +1,22 @@
 {
   "name": "siteproxy",
-  "version": "2.7.11-1",
+  "version": "2.7.11-2",
+  "description": "Readable SiteProxy web proxy for Cloudflare Workers and Node.js",
+  "private": true,
   "type": "module",
   "packageManager": "npm@9.2.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zzzxxxxxxxxxx/siteproxy.git"
+  },
   "engines": {
     "node": ">=22.0.0"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "npm run build && node --test",
-    "check": "npm test && npm run build && node --check bundle.mjs && node --check worker.js",
+    "check": "npm test && node --check bundle.mjs && node --check worker.js",
     "start": "node bundle.mjs",
     "wrangler-login": "wrangler login",
     "deploy-cf-worker": "wrangler deploy"
