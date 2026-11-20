@@ -62,7 +62,17 @@ npm run build
 3. 在 Worker 的 **Settings → Variables and Secrets** 修改 `token_prefix`。无需配置 `proxy_url`。
 4. 保存并部署。
 
-仓库不提交 `worker.js` 和 `bundle.mjs`。Cloudflare Workers 构建会按照 `wrangler.jsonc` 执行 `npm run build`，生成 `main` 指定的 `worker.js`；构建监视目录为 `./src`。
+仓库不提交 `worker.js` 和 `bundle.mjs`。Cloudflare Workers 构建会按照 `wrangler.jsonc` 执行 `npm run build`，生成 `main` 指定的 `worker.js`。
+
+Workers Builds 的远程构建触发条件位于 **Workers 项目 → Settings → Build → Build watch paths**，路径使用仓库相对路径。只希望源码变化触发构建时，可设置：
+
+```text
+src/*
+scripts/*
+package.json
+package-lock.json
+wrangler.jsonc
+```
 
 Cloudflare Workers 始终从请求域名推导 `proxy_url`，不会读取 Worker 环境中的 `proxy_url`。
 
