@@ -21,17 +21,17 @@ var appConfig;
  * keeps the proxy from becoming an unauthenticated open proxy by accident.
  */
 function normalizeConfig(config) {
-    if (
+    const tokenMissing =
         config.token_prefix === undefined ||
         config.token_prefix === null ||
         config.token_prefix === "" ||
         config.token_prefix === "/" ||
-        config.token_prefix === "//" ||
-        config.token_prefix === DEFAULT_TOKEN_PREFIX
-    ) {
+        config.token_prefix === "//";
+    if (tokenMissing) {
         config.token_prefix = DEFAULT_TOKEN_PREFIX;
-        config.default_password = true;
     }
+    config.token_configured = !tokenMissing;
+    config.default_password = config.token_prefix === DEFAULT_TOKEN_PREFIX;
     return config;
 }
 /**
@@ -73,19 +73,21 @@ function loadConfig(onConfig) {
     }
 }
 /**
- * Apply Cloudflare Worker [vars] to the process-wide defaults. Wrangler
- * exposes vars through the fetch(env) argument; the rest of the proxy reads
- * config through getConfig(), so this keeps a single source of truth.
+ * Apply Cloudflare Worker runtime settings. The public proxy origin always
+ * comes from the current request so one Worker can serve both its workers.dev
+ * hostname and custom domains without relying on proxy_url configuration.
  */
-function applyWorkerEnv(env) {
-    if (!env) {
-        return;
+function applyWorkerEnv(env, requestUrl) {
+    let requestOrigin = "";
+    try {
+        requestOrigin = requestUrl ? new URL(requestUrl).origin : "";
+    } catch (error) {
+        console.error("Invalid Worker request URL:", error);
     }
-    if (env.proxy_url) {
-        globalThis.proxy_url = env.proxy_url;
-    }
-    if (env.token_prefix !== undefined) {
-        globalThis.token_prefix = env.token_prefix;
+    globalThis.proxy_url = requestOrigin;
+    globalThis.token_prefix = env?.token_prefix;
+    if (!globalThis.proxy_url) {
+        console.error("Worker proxy_url could not be derived from the request URL.");
     }
 }
 

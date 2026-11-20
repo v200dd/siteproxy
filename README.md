@@ -48,22 +48,23 @@ npm run build
 
 2. 在 Cloudflare Dashboard 打开 **Workers & Pages**，新建一个 Worker。
 3. 进入编辑器的代码页，把 `worker.js` 内容完整粘贴进去并部署。
-4. 在 Worker 的 **Settings → Variables and Secrets** 添加：
-   - `proxy_url`：Worker 的访问地址，例如 `https://proxy.example.com`，结尾不要带 `/`；实际填你的 Worker 域名
-   - `token_prefix`：例如 `/your-password/`，首尾都要有 `/`
+4. 在 Worker 的 **Settings → Variables and Secrets** 添加 `token_prefix`，例如 `/your-password/`，首尾都要有 `/`。Workers 会从当前请求域名自动推导 `proxy_url`。
 5. 在 **Settings → Runtime** 的 Compatibility flags 中加上 `nodejs_compat`。`worker.js` 依赖 Node 兼容层，不加会启动失败。
 6. 保存并重新部署，然后访问 `{proxy_url}{token_prefix}`。
 
 如果不想让 `token_prefix` 以明文显示，可以在 Variables and Secrets 中把它添加为 Secret，不会影响代码读取。
+缺少 `token_prefix` 时所有请求会返回 `503`，不会退回到公开默认密码。
 
 **方式二：连接 GitHub**
 
 1. Fork 本仓库。
 2. 在 Dashboard 打开 **Workers & Pages**，新建 Worker，选择 **Connect to Git**，授权并选择 fork 后的仓库和分支。
-3. 在 Worker 的 **Settings → Variables and Secrets** 修改 `proxy_url` 和 `token_prefix`。
+3. 在 Worker 的 **Settings → Variables and Secrets** 修改 `token_prefix`。无需配置 `proxy_url`。
 4. 保存并部署。
 
 仓库不提交 `worker.js` 和 `bundle.mjs`。Cloudflare Workers 构建会按照 `wrangler.jsonc` 执行 `npm run build`，生成 `main` 指定的 `worker.js`；构建监视目录为 `./src`。
+
+Cloudflare Workers 始终从请求域名推导 `proxy_url`，不会读取 Worker 环境中的 `proxy_url`。
 
 Cloudflare 的出口 IP 可能被部分站点限制，遇到访问异常时可改用 VPS 部署；免费套餐对请求和响应体大小也有限制。
 
@@ -223,6 +224,8 @@ Hono 应用（Node / Cloudflare Worker）
 | 命令 | 说明 |
 | --- | --- |
 | `npm run build` | 用 esbuild 生成 Node 产物 `bundle.mjs` 与 Workers 产物 `worker.js` |
+| `npm test` | 构建产物并运行 Node 内置测试套件 |
+| `npm run check` | 依次运行测试、构建和产物语法检查 |
 | `npm start` | 运行已构建的 Node 产物，首次运行前需要先执行 `npm run build` |
 
 ### 构建说明
@@ -231,6 +234,8 @@ Hono 应用（Node / Cloudflare Worker）
 
 - Node 产物平台为 `node`；
 - Worker 产物平台为 `neutral`，并把 `@hono/node-server`、`fs`、`http`、`zlib` 等 Node 内置模块标记为 external。
+
+仓库包含 GitHub Actions CI，拉取请求和 `master` 更新会运行测试、构建和 Wrangler dry-run。推送任意 tag 时，Release 工作流会自动构建并创建 GitHub Release，上传 `worker.js` 和 `bundle.mjs`。
 
 ## 已知限制与注意事项
 
