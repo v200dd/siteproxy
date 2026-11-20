@@ -1,177 +1,256 @@
-## SiteProxy 2.x
- - [English ver](README_english.md)
+# SiteProxy
 
-SiteProxy 是一个**功能强大的在线代理工具**，采用了最新的技术，提升了代理的稳定性和兼容性。我们致力于提供 **简单、高效、安全** 的代理服务，为用户提供最佳的互联网访问体验。
+SiteProxy 是一个基于 [Hono](https://hono.dev/) 的在线网页代理。访问者打开形如 `{proxy_url}{token_prefix}{protocol}/{host}/{path}` 的地址后，代理会在服务端取回目标网站的内容，改写其中的链接并注入浏览器端脚本，让页面继续留在代理域名下。项目同时支持 **Cloudflare Workers** 和 **Node.js 自托管** 两种运行方式。
 
-- **超高速性能**：采用 Hono 替代传统的Express 服务器，性能提升 4 倍，带来更流畅的使用体验。
-- **云端部署**：完美支持 Cloudflare Worker 部署，快速且高效。
-- **AI 智能聊天**：集成 Duck.ai（原 DuckDuckGo AI Chat），免费提供 GPT-4o mini、GPT-5 mini、Claude 4.5 Haiku、Llama 4、Mistral 等模型，让你的代理服务更加智能。
-- **高级安全保护**：支持密码控制代理，只有授权用户才能访问，大幅提升安全性。
-- **零配置使用**：用户无需进行任何客户端配置，只需访问代理网址即可畅游全球互联网。
-- **便捷登录**：全面支持 GitHub 和 Telegram Web 登录，操作简单快捷。
-- **强力加密**：采用 `RSA + AES` 双重加密技术，保护用户登录密码，防止中间人攻击。
-- **隐私保护**：通过代理网址访问全球互联网，同时隐藏用户真实 IP，保护隐私。
-- **无缝体验**：无需任何软件安装和浏览器配置，即可立即使用，提供极致便利的用户体验。
+本仓库基于 [netptop/siteproxy](https://github.com/netptop/siteproxy) 2.7.11 重构：
+
+- 服务端按职责拆分到 `src/` 下的多个模块；
+- 原混淆包中的浏览器端脚本 `client.js`、`service-worker.js` 已还原为可读源码并纳入版本管理；
+- 使用 esbuild 生成 Node 与 Workers 产物；
+- 仅保留 Node 与 Workers 部署方式，不再包含 Cloudflare Pages、Docker、RSA/AES 登录加密逻辑和测试套件。
+
+> [!CAUTION]
+> 请勿将本项目用于任何违法用途。通过本项目访问第三方网站时，请遵守目标网站的服务条款和当地法律法规。
+
+## 功能概览
+
+- **密码式访问控制**：`token_prefix` 同时充当访问路径和密码，不知道完整前缀就无法使用代理。
+- **完整页面代理**：服务端改写重定向地址和 HTML/CSS 中的 URL，并注入客户端脚本处理 JavaScript 运行时动态生成的 URL。
+- **Service Worker 接管**：浏览器端注册 `siteproxy_service_worker.js`，负责动态请求转发、请求体解码和超大响应头还原。
+- **Cookie 隔离**：把上游网站的 `Set-Cookie` 作用域限制在代理前缀下，并用内部 Cookie 记录当前目标站点。
+- **压缩与编码处理**：支持 gzip/br 的解压与重压；Node 使用 zlib，Workers 使用 CompressionStream。
+- **大响应头支持**：超过平台限制的响应头会被编码进响应体，再由 Service Worker 解包。
+- **内置首页**：访问 `{proxy_url}{token_prefix}` 可以打开带明暗主题和常用站点链接的静态导航页。
+- **兼容规则**：内置针对 Telegram Web 登录页及个别站点的特殊处理。
+
+## 部署
+
+预构建产物发布在 [GitHub Releases](https://github.com/zzzxxxxxxxxxx/siteproxy/releases)：
+
+- [worker.js](https://github.com/zzzxxxxxxxxxx/siteproxy/releases/latest/download/worker.js)：Cloudflare Workers 入口
+- [bundle.mjs](https://github.com/zzzxxxxxxxxxx/siteproxy/releases/latest/download/bundle.mjs)：Node.js 入口
+
+这两个文件不纳入 Git 仓库，可以选择下载 Release 产物或从源码构建。
 
 <details>
-  <summary>查看原理</summary>
+<summary><code><strong>「 Cloudflare Workers 部署 」</strong></code></summary>
 
+**方式一：Dashboard 直接粘贴**
+
+1. 获取 `worker.js`：
+   - 从 Release 下载：[下载 worker.js](https://github.com/zzzxxxxxxxxxx/siteproxy/releases/latest/download/worker.js)
+   - 或者本地构建：
+
+```bash
+npm install
+npm run build
 ```
-                                                 +----> google/youtube
-                             +----------------+  |
-                             |                |  |
-user browser +-------------->+ siteproxy      +-------> wikipedia
-                             |                |  |
-                             +----------------+  |
-                                                 +----> chinese forums
-```
+
+2. 在 Cloudflare Dashboard 打开 **Workers & Pages**，新建一个 Worker。
+3. 进入编辑器的代码页，把 `worker.js` 内容完整粘贴进去并部署。
+4. 在 Worker 的 **Settings → Variables and Secrets** 添加：
+   - `proxy_url`：Worker 的访问地址，例如 `https://proxy.example.com`，结尾不要带 `/`；实际填你的 Worker 域名
+   - `token_prefix`：例如 `/your-password/`，首尾都要有 `/`
+5. 在 **Settings → Runtime** 的 Compatibility flags 中加上 `nodejs_compat`。`worker.js` 依赖 Node 兼容层，不加会启动失败。
+6. 保存并重新部署，然后访问 `{proxy_url}{token_prefix}`。
+
+如果不想让 `token_prefix` 以明文显示，可以在 Variables and Secrets 中把它添加为 Secret，不会影响代码读取。
+
+**方式二：连接 GitHub**
+
+1. Fork 本仓库。
+2. 在 Dashboard 打开 **Workers & Pages**，新建 Worker，选择 **Connect to Git**，授权并选择 fork 后的仓库和分支。
+3. 在 Worker 的 **Settings → Variables and Secrets** 修改 `proxy_url` 和 `token_prefix`。
+4. 保存并部署。
+
+仓库不提交 `worker.js` 和 `bundle.mjs`。Cloudflare Workers 构建会按照 `wrangler.jsonc` 执行 `npm run build`，生成 `main` 指定的 `worker.js`；构建监视目录为 `./src`。
+
+Cloudflare 的出口 IP 可能被部分站点限制，遇到访问异常时可改用 VPS 部署；免费套餐对请求和响应体大小也有限制。
 
 </details>
 
-> [!CAUTION]
-> 严禁将本项目用于任何非法用途，否则后果自负
+<details>
+<summary><code><strong>「 Node.js / VPS 部署 」</strong></code></summary>
 
-> [!WARNING]
-> 由于支持多个网站的 Login，为了减少钓鱼风险，Siteproxy 自 2.x 版本起对代码进行了混淆，同时禁止了默认主页网址的修改。
+**方式一：Release 产物**
 
-## 注意事项
+1. 安装 Node.js 22+。
+2. 从 Release 下载 [下载 bundle.mjs](https://github.com/zzzxxxxxxxxxx/siteproxy/releases/latest/download/bundle.mjs)。
+3. 新建 `config.json`，例如：
 
-- 推荐使用vps或者docker部署。 Cloudflare部署可能导致部分网站无法访问，因为CF的IP已经被一些网站限制访问了。
-- 推荐duckduckgo进行搜索，因为Google搜索和youtube网站都增加了防广告和机器人的机制，访问可能受限。
+```json
+{
+  "proxy_url": "https://proxy.example.com",
+  "token_prefix": "/your-password/",
+  "local_listen_port": 5006
+}
+```
 
-## 部署到 Cloudflare Pages
-1. **确保域名管理**：
-   - 确保你的域名已经在 Cloudflare 名下进行管理。
-2. **克隆仓库,安装依赖**：
-   - 确保nodejs v22或以上版本已经安装, 确保git已经安装。
-   - 执行命令：`git clone https://github.com/netptop/siteproxy.git`
-   - 执行命令：`cd siteproxy`
-   - 执行命令：`npm install`
-   - 执行命令：`npm install -g wrangler`
-3. **登录 Cloudflare创建page，如果已经创建，这一步可以跳过**：
-   - 进入 **Workers 和 Pages** 部分，选择 **使用直接上传创建** 一个 Page，上传刚刚clone的`siteproxy/build/cf_page` 目录进行部署。
-4. **配置自定义域, 如果已经配置，这一步可以跳过**：
-   - 在 **Workers & Pages** 页面，打开刚才部署的 Page。
-   - 点击顶部的 **自定义域**，然后选择 **添加自定义域**，设置为你的代理域名并激活域名。
-5. **编辑配置文件**：
-   - 使用文本编辑器打开 `siteproxy/wrangler.jsonc` 文件,修改如下字段并保存:
-     ```json
-      "name": "xxx", // 替换为你的cloudflare page的名字
-      "vars": {
-        "proxy_url": "https://your-proxy-domain.com", // 替换为你的代理服务器域名, 必须为https
-        "token_prefix": "/default/" // 替换为你想设置的访问密码。首尾斜杠必须保留，如果密码为空，表示不需要密码也可以访问。
-      }
-     ```
-6. **再次部署page**：
-   - 进入clone的siteproxy目录，执行:`npm run wrangler-login`, 如果是非GUI的VPS环境，请参考[非GUI环境wrangler login](api_token_setup.md)
-   - 执行:`npm run deploy-cf-page`
-7. **访问代理服务**：
-   - 现在可以通过 `https://your-proxy-domain.com/your-password/` 访问代理服务（确保最后的斜杠存在）。注意将域名和密码替换为你自己的。
+4. 在 `bundle.mjs` 和 `config.json` 所在目录启动：
 
-## 部署到 Cloudflare Workers
-1. **确保域名管理**：
-   - 确保你的域名已经在 Cloudflare 名下进行管理。
-2. **克隆仓库,安装依赖**：
-   - 确保nodejs v22或以上版本已经安装, 确保git已经安装。
-   - 执行命令：`git clone https://github.com/netptop/siteproxy.git`
-   - 执行命令：`cd siteproxy`
-   - 执行命令：`npm install`
-3. **创建 Worker, 如果已经创建，这一步可以跳过**：
-   - 登录 Cloudflare，进入 **Workers 和 Pages** 部分，创建一个 'hello world' Worker, 请自己命名。
-4. **配置自定义域, 如果已经创建，这一步可以跳过**：
-   - 在 **Workers & Pages** 页面，打开刚才保存的 Worker。
-   - 点击顶部的 **设置 -> 自定义域**，设置为你的代理域名。自定义域名设置并激活。
-5. **编辑配置文件**：
-   - 使用文本编辑器打开 `siteproxy/wrangler.worker.jsonc` 文件,修改如下字段并保存:
-     ```json
-      "name": "xxx", // 替换为你的cloudflare worker的名字
-      "vars": {
-        "proxy_url": "https://your-proxy-domain.com", // 替换为你的代理服务器域名, 必须为https
-        "token_prefix": "/xxx/" // 替换为你想设置的访问密码。首尾斜杠必须保留，如果密码为空，表示不需要密码也可以访问。
-      }
-     ```
-6. **再次部署worker**：
-   - 进入clone的siteproxy目录，执行:`npm run wrangler-login`, 如果是非GUI的VPS环境，请参考[非GUI环境wrangler login](api_token_setup.md)
-   - 执行:`npm run deploy-cf-worker`
-7. **访问代理服务**：
-   - 现在可以通过 `https://your-proxy-domain.com/your-password/` 访问代理服务（确保最后的斜杠存在）。注意将域名和密码替换为你自己的。
+```bash
+node bundle.mjs
+```
 
-## 部署到 VPS 或者云服务器
+**方式二：源码构建**
 
-1. **创建 SSL 网站**：
-   - 使用 `certbot` 和 `nginx` 创建 SSL 网站。具体用法可以 Google 搜索。
-   - 配置 `nginx`，确保 `/etc/nginx/conf.d/default.conf` 文件包含以下内容：
-     ```nginx
-     server {
-        server_name your-proxy.domain.name; #请替换为你的实际域名
-        location / {
-          proxy_pass http://localhost:5006;
-        }
-     }
-     ```
-2. **重启 nginx**：
-   - 执行命令：`sudo systemctl restart nginx`
-3. **安装 Node.js v22 或更高版本**：
-   - 执行以下命令：
-     ```bash
-     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-     source ~/.bashrc
-     nvm install v22
-     ```
-4. **克隆仓库**：
-   - 执行命令：`git clone https://github.com/netptop/siteproxy.git`
-5. **进入项目目录**：
-   - 执行命令：`cd siteproxy`
-6. **测试运行**：
-   - 执行命令：`node bundle.mjs`
-   - 如果没有错误，按 `Ctrl+C` 结束程序。
-7. **配置文件修改**：
-   - 打开并修改 `config.json` 文件，内容如下：
-     ```json
-     {
-        "proxy_url": "https://your-proxy.domain.name", // 替换为HTTPS加你的代理服务器域名，确保使用 https
-        "token_prefix": "/user-SetYourPasswordHere/",  // 设置网站密码，用于防止非法访问，首尾的斜杠必须保留。为空表示不设置密码
-        "local_listen_port": 5006, // 不要修改，以确保与 nginx 配置一致
-        "description": "注意：token_prefix 相当于网站密码，请谨慎设置。 proxy_url 和 token_prefix 合起来就是访问网址。"
-     }
-     ```
-8. **安装 Forever**：
-   - 执行命令：`npm install -g forever`
-9. **启动应用**：
-   - 执行命令：`forever stopall && forever start bundle.mjs`
-10. **访问代理服务**：
-   - 现在可以通过 `https://your-proxy-domain.com/user-your-password/` 访问代理服务。请将域名和密码替换为你自己的域名和密码。
-11. **使用 Cloudflare 加速（可选）**：
-    - 参考 Cloudflare 的官方说明进行设置。
+1. 克隆仓库并安装 Node.js 22+。
+2. 修改 `config.json`，把 `proxy_url` 设为最终的 `https://` 地址。
+3. 安装依赖并生成 Node 产物：
 
-现在，你的代理服务已经成功部署并可以通过浏览器访问。
+```bash
+npm install
+npm run build
+```
 
+4. 启动服务：
 
-## Docker 部署
-1. **配置 SSL 证书和 Nginx**：
-   - 配置域名对应的 SSL 证书和 Nginx，将其指向本地的 5006 端口。
-2. **克隆仓库**：
-   - 执行命令：`git clone https://github.com/netptop/siteproxy.git`
-3. **编辑配置文件**：
-   - 打开并修改 `config.json` 文件，内容如下：
-     ```json
-     {
-        "proxy_url": "https://your-proxy-domain.com", // 替换为你申请到的代理服务器域名
-        "token_prefix": "/user-SetYourPasswordHere/",  // 设置网站密码，用于防止非法访问，保留首尾的斜杠
-        "description": "注意：token_prefix 相当于网站密码，请谨慎设置。 proxy_url 和 token_prefix 合起来就是访问网址。"
-     }
-     ```
-   - 保存文件。
-4. **启动 Docker 容器**：
-   - 进入 `docker-node` 子目录。
-   - 执行命令：`sudo docker compose up`
-5. **访问代理服务**：
-   - 现在可以通过 `https://your-proxy-domain.com/user-your-password/` 访问代理服务。请将域名和密码替换为你自己的域名和密码。
+```bash
+npm start
+```
 
-## 感谢
- - netptop.com 默认主页由 Telgram 网友 SenZyo 设计, 感谢贡献！
- - 文档由 [LAGSNES](https://github.com/SNESNya) 编写
+也可以使用 PM2：
 
-## 联系方式
-Telegram群: https://t.me/+U4UmuuL6Gg6avQsQ
-E-mail: [netptop@gmail.com](mailto:netptop@gmail.com)
+```bash
+npm install -g pm2
+pm2 start bundle.mjs --name siteproxy
+pm2 save
+```
+
+**使用 Nginx 终止 TLS**
+
+把 Nginx 反向代理到本地端口：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name proxy.example.com;
+
+    # ssl_certificate / ssl_certificate_key ...
+
+    location / {
+        proxy_pass http://127.0.0.1:5006;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+访问 `https://proxy.example.com/your-password/`。
+
+Node 进程本身只提供 HTTP，TLS 由 Nginx、Caddy 等反向代理负责。
+
+</details>
+
+## 工作原理
+
+```
+浏览器
+  │  https://proxy.example.com/your-password/https/example.com/path
+  ▼
+Hono 应用（Node / Cloudflare Worker）
+  │  1. 返回浏览器端脚本、首页或 Service Worker
+  │  2. 删除上游 CSP 与报告类响应头
+  │  3. 把请求路径规范化为目标 URL
+  │  4. 清洗请求头与 Cookie，向目标站点发起请求
+  │  5. 改写响应：Location、HTML/JS/CSS、Set-Cookie
+  ▼
+目标网站
+```
+
+### 请求处理流程
+
+1. **返回客户端脚本**：任何以 `siteproxy-response-injected.js` 结尾的请求都直接返回内嵌的客户端脚本，不再当作目标 URL 处理。
+2. **清理 CSP**：代理会改写页面并注入脚本，因此响应链路上会删除 `Content-Security-Policy` 及 `Content-Security-Policy-Report-Only`。
+3. **首页与 Service Worker**：token 根路径返回内置首页；`{token_prefix}siteproxy_service_worker.js` 返回带有当前配置前缀的 Service Worker 脚本。
+4. **规范化目标地址**：`src/proxy/normalize.mjs` 把 token 路径、Referer、代理 Cookie 等不同来源的路径统一成 `{token_prefix}{protocol}/{host}/...`。
+5. **转发请求**：`src/proxy/request.mjs` 解析目标主机，过滤 `proxy_real_*` 等内部 Cookie 和代理特征请求头，重写 `Referer`/`Origin`，然后用 `redirect: "manual"` 请求上游。CORS 预检请求（`OPTIONS`）会被直接转发。
+6. **改写响应**：`src/proxy/response.mjs` 改写 `Location`，对状态码小于 500 的 HTML/JS/CSS 解压、改写、注入脚本并重新压缩，最后处理响应头与 Cookie。
+
+### 响应改写要点
+
+- **HTML**：改写 `src`、`href`、`action`、`poster`、`srcset`、`imagesrcset`、内联样式里的 `url(...)` 等 URL，移除 `<script>`/`<link>` 的 SRI `integrity` 属性，并注入引导脚本。
+- **JavaScript**：用一个轻量词法扫描器替换 `location` 标识符、`window.location` 赋值等，跳过字符串、注释和正则字面量，并递归处理模板字符串中的表达式；同时插入 location guard，避免脚本在注入前读取代理地址。
+- **CSS**：只改写 `url(...)`，不替换标识符。
+- **字符集**：根据响应头或 `<meta charset>` 解码，统一转成 UTF-8 并同步更新响应头。
+- **重定向**：`301/302/303/307/308` 的 `Location` 会被改写回代理前缀。
+- **Cookie**：上游 `Set-Cookie` 的 `Domain` 改为代理域名、`Path` 改为对应的 token 路径，非删除类 Cookie 统一追加 `Max-Age=1800`；响应同时下发 `proxy_real_protocol` 和 `proxy_real_host` 两个内部 Cookie，作为后续请求的目标站点兜底信息。
+
+### 实现细节
+
+- **超大响应头**：单个响应头超过 4096 字符时，如果请求带有 `siteproxy-sw: 1`（表示浏览器端已注册 Service Worker），该响应头会从响应头中移除，编码进响应体；否则直接丢弃。编码格式为魔数 `\0\0SITEPROXYHDR\0`、4 字节大端 JSON 长度、JSON 头、原始 body，并带上 `x-siteproxy-body-headers: 1`，由 Service Worker 解包。SSE 流式响应的超限头会被直接丢弃。
+- **Cookie 超限**：转发前如果请求 Cookie 超过 4000 字节，服务端返回 `431`，并最多下发 2 条过期指令让浏览器清理超限 Cookie。
+- **请求头清洗**：删除 `siteproxy*`、`cf-*`、`x-forwarded*`、`forwarded`、`via`、`x-real-ip` 等代理或转发特征头，再设置目标的 `Host`，并固定使用 `Accept-Encoding: gzip`。
+- **Service Worker**：接管 token 作用域下的请求，处理动态请求的目标主机判定、请求体中的代理 URL 解码、超大响应头还原，并对 `static.cloudflareinsights.com` 返回空脚本。
+- **特殊站点**：`telegram.org` 作为登录站点单独处理；`telegram.org/service_worker.js`、`elcomercio.pe`、`exchangebank.com` 会跳过普通代理路径。相关列表位于 `src/config.mjs`。
+
+## 目录结构
+
+```text
+.
+├── src/
+│   ├── index.mjs              # Hono 应用装配、中间件顺序、Node 启动、Worker 导出
+│   ├── config.mjs             # 配置加载、兼容站点列表、运行环境判断
+│   ├── routes/
+│   │   ├── home.mjs           # token 根路径的首页
+│   │   └── service-worker.mjs # 带配置前缀的 Service Worker
+│   ├── proxy/
+│   │   ├── normalize.mjs      # 目标 URL 规范化
+│   │   ├── request.mjs        # 上游请求、请求头/Cookie 清洗、431 处理
+│   │   ├── response.mjs       # 响应解压/压缩、注入、超大响应头打包
+│   │   └── cookies.mjs        # Cookie 与请求/响应头工具
+│   ├── rewrite/index.mjs      # HTML/JS/CSS 的 URL 与标识符改写
+│   ├── embedded/index.mjs     # 构建期文本资产入口
+│   └── assets/
+│       ├── homepage.html      # 内置首页
+│       ├── client.js          # 注入到目标页面的浏览器端脚本
+│       └── service-worker.js  # Service Worker 源码
+├── scripts/
+│   └── build.mjs              # esbuild 打包脚本
+├── config.json                # Node 运行配置
+├── wrangler.jsonc              # Cloudflare Workers 配置
+├── bundle.mjs                 # 构建产物：Node 入口（已忽略）
+├── worker.js                  # 构建产物：Workers 入口（已忽略）
+└── package.json
+```
+
+`bundle.mjs` 和 `worker.js` 由 `npm run build` 生成并写入 `.gitignore`，不纳入版本控制。Node 部署需要先构建再启动；Cloudflare Workers 构建会自动执行项目构建命令。不要手工编辑这两个产物。
+
+## 开发
+
+### 常用命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `npm run build` | 用 esbuild 生成 Node 产物 `bundle.mjs` 与 Workers 产物 `worker.js` |
+| `npm start` | 运行已构建的 Node 产物，首次运行前需要先执行 `npm run build` |
+
+### 构建说明
+
+`scripts/build.mjs` 使用一个 esbuild 文本资产插件，把 `src/assets` 下的 `.js` 和 `.html` 作为字符串嵌入 bundle，因此这些文件在源码树中仍然是可读、可审查的普通文件。两个产物都是 ESM：
+
+- Node 产物平台为 `node`；
+- Worker 产物平台为 `neutral`，并把 `@hono/node-server`、`fs`、`http`、`zlib` 等 Node 内置模块标记为 external。
+
+## 已知限制与注意事项
+
+- **只有 token 保护**：没有账号体系，token 泄露等于代理被公开使用。
+- **CSP 被移除**：为了注入客户端脚本，上游的 CSP 和报告类响应头不会保留，目标页面的内容安全策略不再生效。
+- **只改写可识别的响应**：仅对状态码小于 500 的 HTML/JavaScript/CSS 做内容改写，其他类型原样转发。
+- **内存占用**：需要改写的响应会整体读入内存，超大页面或大文件可能带来内存压力，也可能触及 Cloudflare 的响应体限制。
+- **Cookie 有效期**：被改写的非删除类 Cookie 会统一追加 `Max-Age=1800`（约 30 分钟）。
+- **站点兼容性**：依赖严格 CSP、复杂登录流程或特殊协议的网站可能无法正常使用；YouTube 等站点可能受反爬策略影响。
+- **登录页风险**：代理页面可能被用于钓鱼，客户端会插入顶部警告条；请不要在通过代理打开的页面中输入敏感信息。
+- **没有自动化测试**：当前仓库未包含测试套件，修改后请自行做基本的手工验证。
+- **Service Worker 依赖 HTTPS**：非 localhost 的纯 HTTP 部署无法注册 Service Worker，动态 URL 处理和大响应头还原会失效。
+
+## 上游与许可
+
+- 上游项目：<https://github.com/netptop/siteproxy>
+- `src/assets/client.js` 与 `src/assets/service-worker.js` 的文件头注明：它们由 siteproxy 2.7.11 的混淆包还原而来，是等价的逆向实现，并非原始源码。
+- 本项目以 MIT License 发布，详见 [LICENSE](LICENSE)。
+
+## 致谢
+
+- 上游作者 netptop 及社区贡献者。
+- 默认主页设计：Telegram 网友 SenZyo（来自上游 README）。
